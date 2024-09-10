@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The **FlipHTML5 Downloader** is a Python tool designed to download pages from FlipHTML5 books and compile them into a single PDF file. It efficiently handles large books with hundreds of pages by downloading images, converting them if necessary, and creating a high-quality PDF document.
+The **FlipHTML5 Downloader** is a Python tool designed to download public pages from FlipHTML5 books and compile them into a single PDF file. It efficiently handles large books with hundreds of pages by downloading images, converting them if necessary, and creating a high-quality PDF document.
 
 ## Features
 
