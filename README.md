@@ -12,6 +12,13 @@ The **FlipHTML5 Downloader** is a Python tool designed to download public pages 
 - **Chunked PDF Creation**: Breaks down large PDFs into smaller chunks to manage memory usage and combines them into a final PDF.
 - **Flexible Page Range**: Allows specifying a range of pages or defaulting to the entire book.
 
+## Open in Google Colab
+
+You can also run this notebook on [Google Colab](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb).
+
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb)
+
+
 ## Installation
 
 To use this tool, you need to install the required Python libraries. You can do this using `pip`. Open your terminal and run:
