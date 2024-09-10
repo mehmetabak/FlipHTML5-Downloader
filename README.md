@@ -53,12 +53,27 @@ You can also use this code on [Google Colab](https://colab.research.google.com/g
 
 Contributions to this project are welcome! If you have any suggestions or improvements, please fork the repository and submit a pull request. 
 
-## Potential Enhancements
+## 🚀 Upcoming Features & Enhancements
 
-- **User Authentication**: Add support for user authentication to access restricted books.
-- **Error Handling**: Improve error handling and retry mechanisms for failed downloads.
-- **GUI Interface**: Develop a graphical user interface (GUI) for ease of use.
-- **Additional Formats**: Support additional image formats and conversion options.
+- **Expanded Format Support**
+  - Support for additional image formats: `PNG`, `TIFF`, `BMP`.
+  - Option for multi-resolution downloads (low, medium, high).
+  - Direct PDF download support from FlipHTML5.
+
+- **Performance Improvements**
+  - Enhanced multi-threading for faster downloads.
+  - Asynchronous requests for reduced wait times.
+  - Memory-based chunk optimization for quicker PDF creation.
+  - Optional image compression for smaller PDF sizes.
+
+- **Improved User Experience**
+  - Simplified CLI with presets for common settings.
+  - Better error handling with automatic retries.
+  - Detailed logging and progress bars for PDF generation.
+  
+- **Advanced Error Handling**
+  - Retry logic for network issues.
+  - Detection and exclusion of corrupt images during PDF creation.
 
 ## Acknowledgments
 
