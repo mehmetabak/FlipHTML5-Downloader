@@ -47,7 +47,7 @@ pip install requests pillow tqdm PyPDF2 fpdf
 
 ## Open in Google Colab
 
-You can also run this notebook on [Google Colab](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb).
+You can also use this code on [Google Colab](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb).
 
 ## Contributing
 
