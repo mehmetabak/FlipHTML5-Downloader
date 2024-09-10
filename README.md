@@ -1,5 +1,7 @@
 # FlipHTML5 Downloader
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb)
+
 ## Purpose
 
 The **FlipHTML5 Downloader** is a Python tool designed to download public pages from FlipHTML5 books and compile them into a single PDF file. It efficiently handles large books with hundreds of pages by downloading images, converting them if necessary, and creating a high-quality PDF document.
@@ -15,9 +17,6 @@ The **FlipHTML5 Downloader** is a Python tool designed to download public pages 
 ## Open in Google Colab
 
 You can also run this notebook on [Google Colab](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb).
-
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mehmetabak/FlipHTML5-Downloader/blob/main/fliphtml5_downloader_colab.ipynb)
-
 
 ## Installation
 
