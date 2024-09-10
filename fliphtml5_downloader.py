@@ -8,6 +8,8 @@ from io import BytesIO
 from tqdm import tqdm  
 import re
 from PyPDF2 import PdfMerger
+from fpdf import FPDF
+
 
 # Introduction message
 print("FlipHTML5 Downloader - Enhanced Version/arasTiR")
