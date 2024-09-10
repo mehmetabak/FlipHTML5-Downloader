@@ -10,7 +10,6 @@ import re
 from PyPDF2 import PdfMerger
 from fpdf import FPDF
 
-
 # Introduction message
 print("FlipHTML5 Downloader - Enhanced Version/arasTiR")
 
@@ -55,8 +54,16 @@ def fetch_config():
         print(f"[-] Error fetching config: {str(e)}")
         return None
 
+# Function to clean taskID
+def clean_taskID(taskID):
+    if taskID.startswith('./files/large/'):
+        taskID = taskID[len('./files/large/'):]  # Remove './files/large/' prefix
+    taskID = re.sub(r'\.webp$|\.jpg$', '', taskID)  # Remove '.webp' or '.jpg' extension if present
+    return taskID
+
 # Function to download a single image
 def download_image(taskID):
+    taskID = clean_taskID(taskID)  # Clean the taskID
     for ext in ['webp', 'jpg']:  # Try webp first, then jpg
         filepath = f"{folderName}/{taskID}.{ext}"
         URL = f"https://online.fliphtml5.com/{bookID}/files/large/{taskID}.{ext}"
@@ -89,7 +96,7 @@ def download_images_concurrently(start, end, max_threads=5):
         return
 
     # Extract page IDs from the configuration
-    pages = [page['n'][0].split('.')[0] for page in config.get('fliphtml5_pages', [])]
+    pages = [page['n'][0] for page in config.get('fliphtml5_pages', [])]
 
     # Ensure pages are in the correct order and total count
     total_pages = len(pages)
@@ -145,7 +152,7 @@ def images_to_pdf(folder, pdf_filename="output.pdf"):
         page_order = [line.strip() for line in f]
 
     for taskID in page_order:
-        image_path = os.path.join(folder, f"{taskID}.jpg")
+        image_path = os.path.join(folder, f"{clean_taskID(taskID)}.jpg")
         if os.path.exists(image_path):
             image_list.append(image_path)
 
