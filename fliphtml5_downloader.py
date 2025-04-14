@@ -41,7 +41,7 @@ useragents = [
 
 # Fetch configuration from a remote URL
 def fetch_config():
-    config_url = f"https://online.fliphtml5.com/okyip/cpcr/javascript/config.js?{bookID}"
+    config_url = f"https://online.fliphtml5.com/{bookID}/javascript/config.js"
     headers = {'User-Agent': random.choice(useragents)}
     try:
         r = requests.get(config_url, headers=headers, timeout=50)
@@ -70,7 +70,7 @@ def download_image(taskID):
     taskID = clean_taskID(taskID)  # Clean the taskID
     for ext in ['jpg', 'webp' ]:  # Try webp first, then jpg
         filepath = f"{folderName}/{taskID}.{ext}"
-        URL = f"https://online.fliphtml5.com/okyip/cpcr/files/large/{taskID}.{ext}"
+        URL = f"https://online.fliphtml5.com/{bookID}/files/large/{taskID}.{ext}"
         headers = {'User-Agent': random.choice(useragents)}
 
         try:
