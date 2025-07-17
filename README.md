@@ -87,7 +87,7 @@ Contributions to this project are welcome! If you have any suggestions or improv
 - [Pillow](https://pillow.readthedocs.io/en/stable/): For image processing.
 - [TQDM](https://tqdm.github.io/): For progress bars.
 - [PyPDF2](https://pythonhosted.org/PyPDF2/): For PDF manipulation.
-- [FPDF](http://www.fpdf.org/): For PDF creation.
+- [FPDF](http://www.fpdf.org/): For PDF creation. (**It will updated soon!**)
 
 ## License
 
