@@ -1,215 +1,263 @@
-
-
-
-import requests
-import json
 import os
+import sys
+import json
 import random
-import threading
-from PIL import Image
-from io import BytesIO
-from tqdm import tqdm
 import re
-from PyPDF2 import PdfMerger
-from fpdf import FPDF
+import concurrent.futures
 
-# Introduction message
-print("FlipHTML5 Downloader - Enhanced Version/arasTiR")
+# 1. Bağımlılık Kontrolü
+try:
+    import requests
+    from PIL import Image
+    from tqdm import tqdm
+    from fpdf import FPDF
+    from PyPDF2 import PdfMerger
+except ImportError as e:
+    missing_module = str(e).split("'")[1]
+    print(f"[-] Hata: Gerekli bir kütüphane eksik: '{missing_module}'")
+    print(f"[-] Lütfen yüklemek için şu komutu çalıştırın: pip install {missing_module}")
+    sys.exit(1)
 
-# User inputs
-bookID = input("Enter Book ID (e.g., 'ousy/stby'): ")
-start = input("Enter the start page number (leave empty for default: 1): ")
-end = input("Enter the end page number (leave empty for default: last page): ")
-folderName = input("Enter folder name for saving (leave empty to use Book ID): ") or bookID.replace("/", "-")
-pdfName = input("Enter PDF filename (leave empty for default): ") or f"{folderName}.pdf"
-skipExisting = input("Skip existing files? (y/n): ").lower() == 'y'
-
-
-# Set default values if start or end are empty
-start = int(start) if start else 1
-end = int(end) if end else None  # 'None' will be set to the last page later
-
-# Create directory if it doesn't exist
-os.makedirs(folderName, exist_ok=True)
-
-# User-agent list to randomize requests
-useragents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36 Edge/16.17017',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/11.1 Safari/605.1.15'
+# --- Sabitler ve Ayarlar ---
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15'
 ]
+MAX_THREADS = 10
 
-# Fetch configuration from a remote URL
-def fetch_config():
-    config_url = f"https://online.fliphtml5.com/{bookID}/javascript/config.js"
-    headers = {'User-Agent': random.choice(useragents)}
+# 2. Dil Metinleri
+LANGUAGES = {
+    "en": {
+        "header": "--- FlipHTML5 Downloader - v5 (Final by arasTiR) ---",
+        "instructions_title": "\nIMPORTANT: Use the ID from the book's direct URL, not from a 'bookcase' link.",
+        "instructions_line1": "Example: For 'https://fliphtml5.com/wrbmv/shsy/', the ID is 'wrbmv/shsy'",
+        "instructions_line2": "Example: For 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
+        "prompt_book_id": "[*] Enter the Book ID (e.g., xovyu/bzlq): ",
+        "warn_id_format": "\n[!] WARNING: The Book ID format seems incorrect. It should be 'xxxx/yyyy'.\n",
+        "fetching_config": "[*] Fetching book configuration...",
+        "found_pages": "[*] Found {total_pages} pages in the book.",
+        "prompt_start_page": "[*] Enter the start page (Press Enter for 1): ",
+        "prompt_end_page": "[*] Enter the end page (Press Enter for {total_pages}): ",
+        "prompt_folder_name": "[*] Enter folder name (Press Enter for '{default_folder}'): ",
+        "prompt_pdf_name": "[*] Enter PDF filename (Press Enter for '{folder_name}.pdf'): ",
+        "prompt_skip_existing": "[*] Skip existing files? (y/n, default n): ",
+        "skip_yes": "y",
+        "processing_pages": "\n[*] A total of {count} pages ({start}-{end}) will be processed.",
+        "progress_downloading": "Downloading Pages",
+        "progress_downloaded": "Downloaded",
+        "progress_skipped": "Skipped",
+        "progress_failed": "Failed",
+        "download_complete": "\n[+] Download process finished. Downloaded: {downloaded}, Skipped: {skipped}, Failed: {failed}.",
+        "first_fail_url": "[-] The first failed attempt was for URL: {url}",
+        "converting_to_pdf": "\n[*] Converting images to PDF...",
+        "creating_pdf_pages": "Creating PDF Pages",
+        "merging_pdf_pages": "[*] Merging temporary PDF pages...",
+        "pdf_success": "\n[+] PDF created successfully: {pdf_name}",
+        "pdf_skipped_all_failed": "[-] PDF creation skipped because all downloads failed.",
+        "pdf_skipped_no_new": "[*] PDF creation skipped as no new files were downloaded.",
+        "all_complete": "\n--- All operations complete ---",
+        "error_no_pages_in_config": "[-] No pages found in the configuration. Please check the Book ID.",
+        "error_could_not_parse": "[-] Could not parse page data from configuration. The site structure may have changed.",
+        "error_invalid_range": "[-] Invalid page range! Please specify a range between 1 and {total_pages}.",
+        "error_image_processing": "[-] Error: Could not process '{filename}': {error}",
+        "error_no_images_to_process": "[-] No images found to process for PDF creation."
+    },
+    "tr": {
+        "header": "--- FlipHTML5 İndirici - v5 (Final by arasTiR) ---",
+        "instructions_title": "\nÖNEMLİ: 'bookcase' linki yerine doğrudan kitabın URL'sindeki ID'yi kullanın.",
+        "instructions_line1": "Örnek: 'https://fliphtml5.com/wrbmv/shsy/' için ID: 'wrbmv/shsy'",
+        "instructions_line2": "Örnek: 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
+        "prompt_book_id": "[*] Kitap ID'sini girin (ör: xovyu/bzlq): ",
+        "warn_id_format": "\n[!] UYARI: Kitap ID formatı yanlış görünüyor. 'xxxx/yyyy' formatında olmalıdır.\n",
+        "fetching_config": "[*] Kitap yapılandırması çekiliyor...",
+        "found_pages": "[*] Kitapta {total_pages} sayfa bulundu.",
+        "prompt_start_page": "[*] Başlangıç sayfasını girin (boş bırakırsanız: 1): ",
+        "prompt_end_page": "[*] Bitiş sayfasını girin (boş bırakırsanız: {total_pages}): ",
+        "prompt_folder_name": "[*] Klasör adını girin (boş bırakırsanız: '{default_folder}'): ",
+        "prompt_pdf_name": "[*] PDF dosya adını girin (boş bırakırsanız: '{folder_name}.pdf'): ",
+        "prompt_skip_existing": "[*] Mevcut dosyalar atılsın mı? (e/h, varsayılan h): ",
+        "skip_yes": "e",
+        "processing_pages": "\n[*] Toplam {count} sayfa ({start}-{end}) işlenecek.",
+        "progress_downloading": "Sayfalar İndiriliyor",
+        "progress_downloaded": "İndi",
+        "progress_skipped": "Atlandı",
+        "progress_failed": "Hata",
+        "download_complete": "\n[+] İndirme işlemi tamamlandı. İndi: {downloaded}, Atlandı: {skipped}, Hata: {failed}.",
+        "first_fail_url": "[-] İlk başarısız deneme şu URL içindi: {url}",
+        "converting_to_pdf": "\n[*] Resimler PDF'e dönüştürülüyor...",
+        "creating_pdf_pages": "PDF Sayfaları Oluşturuluyor",
+        "merging_pdf_pages": "[*] Geçici PDF sayfaları birleştiriliyor...",
+        "pdf_success": "\n[+] PDF başarıyla oluşturuldu: {pdf_name}",
+        "pdf_skipped_all_failed": "[-] Tüm indirmeler başarısız olduğu için PDF oluşturma işlemi atlandı.",
+        "pdf_skipped_no_new": "[*] Yeni dosya indirilmediği için PDF oluşturma işlemi atlandı.",
+        "all_complete": "\n--- Tüm işlemler tamamlandı ---",
+        "error_no_pages_in_config": "[-] Yapılandırmada hiç sayfa bulunamadı. Lütfen Kitap ID'sini kontrol edin.",
+        "error_could_not_parse": "[-] Yapılandırmadan sayfa verileri okunamadı. Site yapısı değişmiş olabilir.",
+        "error_invalid_range": "[-] Geçersiz sayfa aralığı! Lütfen 1 ile {total_pages} arasında bir aralık belirtin.",
+        "error_image_processing": "[-] Hata: '{filename}' işlenemedi: {error}",
+        "error_no_images_to_process": "[-] PDF oluşturmak için işlenecek resim bulunamadı."
+    }
+}
+
+# --- Yardımcı Fonksiyonlar (Bunlar değişmedi) ---
+
+def fetch_config(book_id):
+    config_url = f"https://online.fliphtml5.com/{book_id}/javascript/config.js"
+    headers = {'User-Agent': random.choice(USER_AGENTS)}
     try:
-        r = requests.get(config_url, headers=headers, timeout=50)
-        r.raise_for_status()
-        # Extract JSON part from JavaScript content
-        json_str = re.search(r'var htmlConfig = ({.*?});', r.text, re.DOTALL)
-        if json_str:
-            config_data = json.loads(json_str.group(1))  # Parse JSON
-            return config_data
-        else:
-            print("[-] JSON format not found in config content.")
-            return None
-    except Exception as e:
-        print(f"[-] Error fetching config: {str(e)}")
+        response = requests.get(config_url, headers=headers, timeout=20)
+        response.raise_for_status()
+        json_match = re.search(r'var\s+htmlConfig\s*=\s*({.*?});', response.text, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group(1))
+    except Exception:
         return None
+    return None
 
-# Function to clean taskID
-def clean_taskID(taskID):
-    if taskID.startswith('./files/large/'):
-        taskID = taskID[len('./files/large/'):]  # Remove './files/large/' prefix
-    taskID = re.sub(r'\.webp$|\.jpg$', '', taskID)  # Remove '.webp' or '.jpg' extension if present
-    return taskID
-
-# Function to download a single image
-def download_image(taskID):
-    taskID = clean_taskID(taskID)  # Clean the taskID
-    for ext in ['jpg', 'webp' ]:  # Try webp first, then jpg
-        filepath = f"{folderName}/{taskID}.{ext}"
-        URL = f"https://online.fliphtml5.com/{bookID}/files/large/{taskID}.{ext}"
-        headers = {'User-Agent': random.choice(useragents)}
-
+def download_image(args):
+    page_id, book_id, folder_name, skip_existing = args
+    image_path_jpg = os.path.join(folder_name, f"{page_id}.jpg")
+    if skip_existing and os.path.exists(image_path_jpg):
+        return "skipped", None
+    headers = {'User-Agent': random.choice(USER_AGENTS), 'Referer': f"https://online.fliphtml5.com/{book_id}/"}
+    for ext in ['webp', 'jpg']:
+        url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.{ext}"
         try:
-            r = requests.get(URL, headers=headers, timeout=10)
-            if r.status_code == 200:
-                img = Image.open(BytesIO(r.content))
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                with Image.open(BytesIO(response.content)) as img:
+                    img.convert("RGB").save(image_path_jpg, "JPEG")
+                return "downloaded", None
+        except requests.exceptions.RequestException:
+            continue
+        except Exception:
+            return "failed", url
+    return "failed", url
 
-                # Convert webp to jpg if needed
-                if ext == 'webp':
-                    jpg_filepath = f"{folderName}/{taskID}.jpg"
-                    img.convert("RGB").save(jpg_filepath, "JPEG")
-                    print(f"[+] Page {taskID} downloaded as {ext} and converted to .jpg")
-                else:
-                    img.save(filepath)
-                    print(f"[+] Page {taskID} downloaded as {ext}")
-                return
-            else:
-                print(f"[-] Page {taskID} failed to download ({ext}, HTTP {r.status_code})")
-        except Exception as e:
-            print(f"[-] Page {taskID} failed to download: {str(e)}")
-
-# Download images in range with a progress bar and optional threading for optimization
-def download_images_concurrently(start, end, max_threads=5):
-    config = fetch_config()
-    if not config:
-        print("[-] Configuration fetch failed. Exiting.")
-        return
-
-    # Extract page IDs from the configuration
-    pages = [page['n'][0] for page in config.get('fliphtml5_pages', [])]
-
-    # Ensure pages are in the correct order and total count
-    total_pages = len(pages)
-
-    # Ensure the start and end are within the correct range
-    if start < 1 or (end is not None and end > total_pages) or start > (end if end is not None else total_pages):
-        print("[-] Invalid page range specified.")
-        return
-
-    # Set end to the last page if it was not specified
-    end = end if end is not None else total_pages
-
-    # Get the correct page IDs based on user input
-    filtered_pages = pages[start-1:end]
-
-    # Save page order to a file for accurate sorting later
-    with open(f"{folderName}/page_order.txt", "w") as f:
-        for page in filtered_pages:
-            f.write(f"{page}\n")
-
-    threads = []
-    with tqdm(total=len(filtered_pages)) as pbar:
-        def worker(taskID):
-            filepath_webp = f"{folderName}/{taskID}.webp"
-            filepath_jpg = f"{folderName}/{taskID}.jpg"
-
-            if skipExisting and (os.path.exists(filepath_webp) or os.path.exists(filepath_jpg)):
-                print(f"[ ] Page {taskID} already exists, skipping.")
-            else:
-                download_image(taskID)
-            pbar.update(1)
-
-        for taskID in filtered_pages:
-            while len(threads) >= max_threads:
-                for thread in threads:
-                    if not thread.is_alive():
-                        threads.remove(thread)
-
-            t = threading.Thread(target=worker, args=(taskID,))
-            t.start()
-            threads.append(t)
-
-        for thread in threads:
-            thread.join()
-
-# Function to convert images to PDF
-def images_to_pdf(folder, pdf_filename="output.pdf"):
-    pdf_files = []
-    image_list = []
-
-    # Extract pages from folder and sort by their original order
-    with open(f"{folder}/page_order.txt") as f:
-        page_order = [line.strip() for line in f]
-
-    for taskID in page_order:
-        image_path = os.path.join(folder, f"{clean_taskID(taskID)}.jpg")
-        if os.path.exists(image_path):
-            image_list.append(image_path)
-
-    # Generate PDF files in chunks
-    chunk_size = 50
-    num_chunks = (len(image_list) // chunk_size) + 1
-
-    image_path = image_list[0]
-    width_pt, height_pt = 595, 842 #Default A4 dimensions in case of error with the first image
-
-    with Image.open(image_path) as img:
-            # Get image dimensions in points (1 inch = 72 points)
-            width, height = img.size
-            width_pt, height_pt = width * 72 / img.info.get("dpi", (72, 72))[0], height * 72 / img.info.get("dpi", (72, 72))[1]
-
-
-    
-    for i in range(num_chunks):
-        chunk_filename = f"{folder}/chunk_{i+1}.pdf"
-        pdf_files.append(chunk_filename)
-
-       
-        pdf = FPDF(unit="pt", format=(width_pt, height_pt))  # Use points as the unit for precise sizing
-        start_index = i * chunk_size
-        end_index = min((i + 1) * chunk_size, len(image_list))
-
-        for image_path in image_list[start_index:end_index]:
-                
-                # Add a new page with the image's dimensions
-                pdf.add_page() #Fails with format argument, otherwise get dimensions here
-                pdf.image(image_path, 0,0) # 0,0 To place in top corner, dimensions are auto
-                
-
-        pdf.output(chunk_filename)
-        print(f"[+] PDF chunk created: {chunk_filename}")
-
-    # Combine PDF chunks into a single file
+def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
+    print(STRINGS["converting_to_pdf"])
+    image_paths = [os.path.join(folder_name, f"{page_id}.jpg") for page_id in page_order]
+    temp_pdf_files = []
     merger = PdfMerger()
-    for pdf_file in pdf_files:
+    for i, image_path in enumerate(tqdm(image_paths, desc=STRINGS["creating_pdf_pages"])):
+        if not os.path.exists(image_path):
+            continue
+        try:
+            with Image.open(image_path) as img:
+                width_px, height_px = img.size
+                dpi = img.info.get('dpi', (72, 72))
+                width_pt = width_px * 72 / dpi[0]
+                height_pt = height_px * 72 / dpi[1]
+                pdf = FPDF(unit="pt", format=(width_pt, height_pt))
+                pdf.add_page()
+                pdf.image(image_path, 0, 0, width_pt, height_pt)
+                temp_pdf_path = os.path.join(folder_name, f"~temp_{i}.pdf")
+                pdf.output(temp_pdf_path)
+                temp_pdf_files.append(temp_pdf_path)
+        except Exception as e:
+            print(STRINGS["error_image_processing"].format(filename=os.path.basename(image_path), error=e), file=sys.stderr)
+    if not temp_pdf_files:
+        print(STRINGS["error_no_images_to_process"], file=sys.stderr)
+        return
+    print(STRINGS["merging_pdf_pages"])
+    for pdf_file in temp_pdf_files:
         merger.append(pdf_file)
-
-    merger.write(pdf_filename)
+    merger.write(pdf_name)
     merger.close()
+    for pdf_file in temp_pdf_files:
+        try:
+            os.remove(pdf_file)
+        except OSError:
+            pass
+    print(STRINGS["pdf_success"].format(pdf_name=pdf_name))
 
-    # Cleanup temporary PDF chunks
-    for pdf_file in pdf_files:
-        os.remove(pdf_file)
+# --- Ana Program Akışı ---
+def main():
+    lang_choice = ""
+    while lang_choice not in ['en', 'tr']:
+        lang_choice = input("Select language / Dil seçin (en/tr): ").lower()
+    STRINGS = LANGUAGES[lang_choice]
 
-    print(f"[+] Final PDF created: {pdf_filename}")
+    print(STRINGS["header"])
+    print(STRINGS["instructions_title"])
+    print(STRINGS["instructions_line1"])
+    print(STRINGS["instructions_line2"])
 
+    book_id = input(STRINGS["prompt_book_id"])
+    if '/' not in book_id or len(book_id.split('/')) != 2:
+        print(STRINGS["warn_id_format"])
 
-# Start downloading images
-download_images_concurrently(start, end)
+    print(STRINGS["fetching_config"])
+    config = fetch_config(book_id)
+    if not config:
+        print(LANGUAGES["en"]["error_no_pages_in_config"], file=sys.stderr) # Fallback to English for early errors
+        return
 
-# Create PDF from downloaded images
-images_to_pdf(folderName, pdfName)
+    try:
+        all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in config.get('fliphtml5_pages', [])]
+        total_pages = len(all_pages)
+        if total_pages == 0:
+            print(STRINGS["error_no_pages_in_config"], file=sys.stderr)
+            return
+    except (TypeError, IndexError):
+        print(STRINGS["error_could_not_parse"], file=sys.stderr)
+        return
+
+    print(STRINGS["found_pages"].format(total_pages=total_pages))
+    
+    start_page_str = input(STRINGS["prompt_start_page"])
+    end_page_str = input(STRINGS["prompt_end_page"].format(total_pages=total_pages))
+    
+    start_page = int(start_page_str) if start_page_str.isdigit() else 1
+    end_page = int(end_page_str) if end_page_str.isdigit() else total_pages
+
+    default_folder = book_id.replace('/', '-')
+    folder_name = input(STRINGS["prompt_folder_name"].format(default_folder=default_folder)) or default_folder
+    pdf_name = input(STRINGS["prompt_pdf_name"].format(folder_name=folder_name)) or f"{folder_name}.pdf"
+    skip_existing_input = input(STRINGS["prompt_skip_existing"]).lower()
+    skip_existing = skip_existing_input.startswith(STRINGS["skip_yes"])
+    
+    os.makedirs(folder_name, exist_ok=True)
+
+    if not (1 <= start_page <= total_pages and start_page <= end_page <= total_pages):
+        print(STRINGS["error_invalid_range"].format(total_pages=total_pages), file=sys.stderr)
+        return
+        
+    pages_to_download = all_pages[start_page - 1:end_page]
+    print(STRINGS["processing_pages"].format(count=len(pages_to_download), start=start_page, end=end_page))
+    
+    tasks = [(page, book_id, folder_name, skip_existing) for page in pages_to_download]
+    downloaded, skipped, failed, first_error_url = 0, 0, 0, None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        future_to_page = {executor.submit(download_image, task): task[0] for task in tasks}
+        progress_bar = tqdm(concurrent.futures.as_completed(future_to_page), total=len(tasks), desc=STRINGS["progress_downloading"])
+        
+        for future in progress_bar:
+            try:
+                result, url = future.result()
+                if result == "downloaded": downloaded += 1
+                elif result == "skipped": skipped += 1
+                else:
+                    failed += 1
+                    if first_error_url is None: first_error_url = url
+                progress_bar.set_postfix_str(f"{STRINGS['progress_downloaded']}: {downloaded}, {STRINGS['progress_skipped']}: {skipped}, {STRINGS['progress_failed']}: {failed}")
+            except Exception:
+                failed += 1
+
+    print(STRINGS["download_complete"].format(downloaded=downloaded, skipped=skipped, failed=failed))
+    if first_error_url:
+        print(STRINGS["first_fail_url"].format(url=first_error_url))
+    
+    if downloaded > 0 or (skipped > 0 and not os.path.exists(pdf_name)):
+        convert_images_to_pdf(folder_name, pdf_name, pages_to_download, STRINGS)
+    elif failed == len(tasks):
+        print(STRINGS["pdf_skipped_all_failed"])
+    else:
+        print(STRINGS["pdf_skipped_no_new"])
+
+    print(STRINGS["all_complete"])
+
+if __name__ == "__main__":
+    main()
