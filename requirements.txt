@@ -1,5 +1,11 @@
-fpdf==1.7.2
-pillow==11.1.0
-PyPDF2==3.0.1
-requests==2.32.3
-tqdm==4.67.1
+# Bu dosya, programın çalışması için gerekli olan minimum kütüphane sürümlerini belirtir.
+# Bu sayede hem uyumluluk garanti edilir hem de kullanıcıların en güncel ve güvenli
+# kütüphaneleri kurması sağlanır.
+# Kurulum için: pip install -r requirements.txt
+
+requests>=2.31.0
+pillow>=10.3.0
+tqdm>=4.66.0
+PyPDF2>=3.0.1
+# En son sürümü olan 1.7.2'yi temel alır. Gelecekte fpdf2'ye geçilebilir.
+fpdf>=1.7.2
