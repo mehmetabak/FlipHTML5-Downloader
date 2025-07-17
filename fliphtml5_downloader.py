@@ -14,8 +14,8 @@ try:
     from PyPDF2 import PdfMerger
 except ImportError as e:
     missing_module = str(e).split("'")[1]
-    print(f"[-] Error: A required library is missing: '{missing_module}'")
-    print(f"[-] Please run this command to install it: pip install {missing_module}")
+    print(f"[-] Hata: Gerekli bir kütüphane eksik: '{missing_module}'")
+    print(f"[-] Lütfen yüklemek için şu komutu çalıştırın: pip install {missing_module}")
     sys.exit(1)
 
 # --- Sabitler ve Ayarlar ---
@@ -29,7 +29,7 @@ MAX_THREADS = 15
 # --- Dil Metinleri ---
 LANGUAGES = {
     "en": {
-        "header": "--- FlipHTML5 Downloader - v7 (arasTiR) ---",
+        "header": "--- FlipHTML5 Downloader - v8 (Final by arasTiR) ---",
         "instructions_title": "\nIMPORTANT: Use the ID from the book's direct URL, not from a 'bookcase' link.",
         "instructions_line1": "Example: For 'https://fliphtml5.com/wrbmv/shsy/', the ID is 'wrbmv/shsy'",
         "instructions_line2": "Example: For 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
@@ -65,7 +65,7 @@ LANGUAGES = {
         "error_no_images_to_process": "[-] No images found to process for PDF creation."
     },
     "tr": {
-        "header": "--- FlipHTML5 İndirici - v7 (arasTiR) ---",
+        "header": "--- FlipHTML5 İndirici - v8 (Final by arasTiR) ---",
         "instructions_title": "\nÖNEMLİ: 'bookcase' linki yerine doğrudan kitabın URL'sindeki ID'yi kullanın.",
         "instructions_line1": "Örnek: 'https://fliphtml5.com/wrbmv/shsy/' için ID: 'wrbmv/shsy'",
         "instructions_line2": "Örnek: 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
@@ -75,6 +75,10 @@ LANGUAGES = {
         "found_pages": "[*] Kitapta {total_pages} sayfa bulundu.",
         "prompt_start_page": "[*] Başlangıç sayfasını girin (boş bırakırsanız: 1): ",
         "prompt_end_page": "[*] Bitiş sayfasını girin (boş bırakırsanız: {total_pages}): ",
+        # --- EKSİK OLAN VE EKLENEN SATIRLAR ---
+        "prompt_folder_name": "[*] Klasör adını girin (boş bırakırsanız: '{default_folder}'): ",
+        "prompt_pdf_name": "[*] PDF dosya adını girin (boş bırakırsanız: '{folder_name}.pdf'): ",
+        # ------------------------------------
         "prompt_skip_existing": "[*] Mevcut dosyalar atılsın mı? (e/h, varsayılan h): ",
         "skip_yes": "e",
         "processing_pages": "\n[*] Toplam {count} sayfa ({start}-{end}) işlenecek.",
@@ -99,8 +103,6 @@ LANGUAGES = {
         "error_no_images_to_process": "[-] PDF oluşturmak için işlenecek resim bulunamadı."
     }
 }
-
-# --- Yardımcı Fonksiyonlar ---
 
 def fetch_config(session, book_id):
     config_url = f"https://online.fliphtml5.com/{book_id}/javascript/config.js"
