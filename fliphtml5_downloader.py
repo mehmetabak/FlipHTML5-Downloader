@@ -29,7 +29,7 @@ MAX_THREADS = 10
 # 2. Dil Metinleri
 LANGUAGES = {
     "en": {
-        "header": "--- FlipHTML5 Downloader - v5 (Final by arasTiR) ---",
+        "header": "--- FlipHTML5 Downloader - v7 (Hybrid by arasTiR) ---",
         "instructions_title": "\nIMPORTANT: Use the ID from the book's direct URL, not from a 'bookcase' link.",
         "instructions_line1": "Example: For 'https://fliphtml5.com/wrbmv/shsy/', the ID is 'wrbmv/shsy'",
         "instructions_line2": "Example: For 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
@@ -57,6 +57,7 @@ LANGUAGES = {
         "pdf_skipped_all_failed": "[-] PDF creation skipped because all downloads failed.",
         "pdf_skipped_no_new": "[*] PDF creation skipped as no new files were downloaded.",
         "all_complete": "\n--- All operations complete ---",
+        "error_fetching_config": "[-] CRITICAL: Failed to fetch or parse configuration file. Please check Book ID and network connection.",
         "error_no_pages_in_config": "[-] No pages found in the configuration. Please check the Book ID.",
         "error_could_not_parse": "[-] Could not parse page data from configuration. The site structure may have changed.",
         "error_invalid_range": "[-] Invalid page range! Please specify a range between 1 and {total_pages}.",
@@ -64,7 +65,7 @@ LANGUAGES = {
         "error_no_images_to_process": "[-] No images found to process for PDF creation."
     },
     "tr": {
-        "header": "--- FlipHTML5 İndirici - v5 (Final by arasTiR) ---",
+        "header": "--- FlipHTML5 İndirici - v7 (Hibrit by arasTiR) ---",
         "instructions_title": "\nÖNEMLİ: 'bookcase' linki yerine doğrudan kitabın URL'sindeki ID'yi kullanın.",
         "instructions_line1": "Örnek: 'https://fliphtml5.com/wrbmv/shsy/' için ID: 'wrbmv/shsy'",
         "instructions_line2": "Örnek: 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
@@ -92,6 +93,7 @@ LANGUAGES = {
         "pdf_skipped_all_failed": "[-] Tüm indirmeler başarısız olduğu için PDF oluşturma işlemi atlandı.",
         "pdf_skipped_no_new": "[*] Yeni dosya indirilmediği için PDF oluşturma işlemi atlandı.",
         "all_complete": "\n--- Tüm işlemler tamamlandı ---",
+        "error_fetching_config": "[-] KRİTİK: Yapılandırma dosyası çekilemedi veya işlenemedi. Lütfen Kitap ID'sini ve internet bağlantınızı kontrol edin.",
         "error_no_pages_in_config": "[-] Yapılandırmada hiç sayfa bulunamadı. Lütfen Kitap ID'sini kontrol edin.",
         "error_could_not_parse": "[-] Yapılandırmadan sayfa verileri okunamadı. Site yapısı değişmiş olabilir.",
         "error_invalid_range": "[-] Geçersiz sayfa aralığı! Lütfen 1 ile {total_pages} arasında bir aralık belirtin.",
@@ -100,7 +102,7 @@ LANGUAGES = {
     }
 }
 
-# --- Yardımcı Fonksiyonlar (Bunlar değişmedi) ---
+# --- ÇALIŞAN ÇEKİRDEK FONKSİYONLAR ---
 
 def fetch_config(book_id):
     config_url = f"https://online.fliphtml5.com/{book_id}/javascript/config.js"
@@ -111,16 +113,20 @@ def fetch_config(book_id):
         json_match = re.search(r'var\s+htmlConfig\s*=\s*({.*?});', response.text, re.DOTALL)
         if json_match:
             return json.loads(json_match.group(1))
-    except Exception:
+        else:
+            return None
+    except (requests.exceptions.RequestException, json.JSONDecodeError):
         return None
-    return None
 
 def download_image(args):
     page_id, book_id, folder_name, skip_existing = args
     image_path_jpg = os.path.join(folder_name, f"{page_id}.jpg")
     if skip_existing and os.path.exists(image_path_jpg):
         return "skipped", None
-    headers = {'User-Agent': random.choice(USER_AGENTS), 'Referer': f"https://online.fliphtml5.com/{book_id}/"}
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Referer': f"https://online.fliphtml5.com/{book_id}/"
+    }
     for ext in ['webp', 'jpg']:
         url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.{ext}"
         try:
@@ -137,9 +143,9 @@ def download_image(args):
 
 def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
     print(STRINGS["converting_to_pdf"])
+    temp_pdf_files, merger = [], PdfMerger()
     image_paths = [os.path.join(folder_name, f"{page_id}.jpg") for page_id in page_order]
-    temp_pdf_files = []
-    merger = PdfMerger()
+    
     for i, image_path in enumerate(tqdm(image_paths, desc=STRINGS["creating_pdf_pages"])):
         if not os.path.exists(image_path):
             continue
@@ -147,8 +153,7 @@ def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
             with Image.open(image_path) as img:
                 width_px, height_px = img.size
                 dpi = img.info.get('dpi', (72, 72))
-                width_pt = width_px * 72 / dpi[0]
-                height_pt = height_px * 72 / dpi[1]
+                width_pt, height_pt = width_px * 72 / dpi[0], height_px * 72 / dpi[1]
                 pdf = FPDF(unit="pt", format=(width_pt, height_pt))
                 pdf.add_page()
                 pdf.image(image_path, 0, 0, width_pt, height_pt)
@@ -157,22 +162,24 @@ def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
                 temp_pdf_files.append(temp_pdf_path)
         except Exception as e:
             print(STRINGS["error_image_processing"].format(filename=os.path.basename(image_path), error=e), file=sys.stderr)
+    
     if not temp_pdf_files:
         print(STRINGS["error_no_images_to_process"], file=sys.stderr)
         return
+
     print(STRINGS["merging_pdf_pages"])
     for pdf_file in temp_pdf_files:
         merger.append(pdf_file)
     merger.write(pdf_name)
     merger.close()
+    
     for pdf_file in temp_pdf_files:
-        try:
-            os.remove(pdf_file)
-        except OSError:
-            pass
+        try: os.remove(pdf_file)
+        except OSError: pass
+    
     print(STRINGS["pdf_success"].format(pdf_name=pdf_name))
 
-# --- Ana Program Akışı ---
+
 def main():
     lang_choice = ""
     while lang_choice not in ['en', 'tr']:
@@ -180,9 +187,7 @@ def main():
     STRINGS = LANGUAGES[lang_choice]
 
     print(STRINGS["header"])
-    print(STRINGS["instructions_title"])
-    print(STRINGS["instructions_line1"])
-    print(STRINGS["instructions_line2"])
+    print(STRINGS["instructions_title"], STRINGS["instructions_line1"], STRINGS["instructions_line2"], sep='\n')
 
     book_id = input(STRINGS["prompt_book_id"])
     if '/' not in book_id or len(book_id.split('/')) != 2:
@@ -191,13 +196,13 @@ def main():
     print(STRINGS["fetching_config"])
     config = fetch_config(book_id)
     if not config:
-        print(LANGUAGES["en"]["error_no_pages_in_config"], file=sys.stderr) # Fallback to English for early errors
+        print(STRINGS["error_fetching_config"], file=sys.stderr)
         return
 
     try:
         all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in config.get('fliphtml5_pages', [])]
         total_pages = len(all_pages)
-        if total_pages == 0:
+        if not all_pages:
             print(STRINGS["error_no_pages_in_config"], file=sys.stderr)
             return
     except (TypeError, IndexError):
@@ -215,8 +220,7 @@ def main():
     default_folder = book_id.replace('/', '-')
     folder_name = input(STRINGS["prompt_folder_name"].format(default_folder=default_folder)) or default_folder
     pdf_name = input(STRINGS["prompt_pdf_name"].format(folder_name=folder_name)) or f"{folder_name}.pdf"
-    skip_existing_input = input(STRINGS["prompt_skip_existing"]).lower()
-    skip_existing = skip_existing_input.startswith(STRINGS["skip_yes"])
+    skip_existing = input(STRINGS["prompt_skip_existing"]).lower().startswith(STRINGS["skip_yes"])
     
     os.makedirs(folder_name, exist_ok=True)
 
@@ -243,7 +247,7 @@ def main():
                     failed += 1
                     if first_error_url is None: first_error_url = url
                 progress_bar.set_postfix_str(f"{STRINGS['progress_downloaded']}: {downloaded}, {STRINGS['progress_skipped']}: {skipped}, {STRINGS['progress_failed']}: {failed}")
-            except Exception:
+            except Exception as e:
                 failed += 1
 
     print(STRINGS["download_complete"].format(downloaded=downloaded, skipped=skipped, failed=failed))
