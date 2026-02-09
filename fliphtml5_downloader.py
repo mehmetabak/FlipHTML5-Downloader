@@ -18,6 +18,39 @@ except ImportError as e:
     print(f"[-] Lütfen yüklemek için şu komutu çalıştırın: pip install {missing_module}")
     sys.exit(1)
 
+# --- ŞİFRE ÇÖZÜCÜ FONKSİYON (FlipHTML5 'v01' formatı için) ---
+def de_string(s):
+    """
+    FlipHTML5 'deString' fonksiyonunun Python karşılığı.
+    'v01' ile başlayan şifreli config string'ini çözer.
+    Mantık: Stringi ortadan ikiye bölüp fermuar gibi birleştirir.
+    """
+    if not isinstance(s, str) or not s.startswith("v01"):
+        return None
+    
+    # 'v01' önekini at (ilk 3 karakter)
+    buffer = s[3:]
+    length = len(buffer)
+    
+    # Algoritma: Stringi ikiye böl
+    # JS karşılığı: h = length >> 1
+    h = length >> 1  # Bitwise shift right (tam sayı olarak 2'ye bölme)
+    
+    decoded_parts = []
+    
+    # İlk yarı ve ikinci yarıyı sırayla birleştir
+    for i in range(h):
+        # buffer[i] -> İlk yarıdan bir karakter
+        # buffer[h + i] -> İkinci yarıdan bir karakter
+        decoded_parts.append(buffer[i])
+        decoded_parts.append(buffer[h + i])
+    
+    # Eğer uzunluk tek sayıysa, son kalan karakteri (ikinci yarının sonu) ekle
+    if length % 2 == 1:
+        decoded_parts.append(buffer[length - 1])
+        
+    return "".join(decoded_parts)
+
 # --- Sabitler ve Ayarlar ---
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -75,10 +108,8 @@ LANGUAGES = {
         "found_pages": "[*] Kitapta {total_pages} sayfa bulundu.",
         "prompt_start_page": "[*] Başlangıç sayfasını girin (boş bırakırsanız: 1): ",
         "prompt_end_page": "[*] Bitiş sayfasını girin (boş bırakırsanız: {total_pages}): ",
-        # --- EKSİK OLAN VE EKLENEN SATIRLAR ---
         "prompt_folder_name": "[*] Klasör adını girin (boş bırakırsanız: '{default_folder}'): ",
         "prompt_pdf_name": "[*] PDF dosya adını girin (boş bırakırsanız: '{folder_name}.pdf'): ",
-        # ------------------------------------
         "prompt_skip_existing": "[*] Mevcut dosyalar atılsın mı? (e/h, varsayılan h): ",
         "skip_yes": "e",
         "processing_pages": "\n[*] Toplam {count} sayfa ({start}-{end}) işlenecek.",
@@ -117,12 +148,12 @@ def fetch_config(session, book_id):
 def download_image(args):
     session, page_id, book_id, folder_name, skip_existing = args
     image_path_jpg = os.path.join(folder_name, f"{page_id}.jpg")
-    
+
     if skip_existing and os.path.exists(image_path_jpg):
         return "skipped", None
 
     headers = {'Referer': f"https://online.fliphtml5.com/{book_id}/"}
-    
+
     for ext in ['webp', 'jpg']:
         url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.{ext}"
         try:
@@ -181,28 +212,62 @@ def main():
 
     with requests.Session() as session:
         session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
-        
+
         print(STRINGS["fetching_config"])
         config = fetch_config(session, book_id)
         if not config:
             print(STRINGS["error_fetching_config"], file=sys.stderr)
             return
 
+        # -------------------------------------------------------------
+        # REVİZE EDİLEN SAYFA ÇEKME MANTIĞI
+        # -------------------------------------------------------------
         try:
-            all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in config.get('fliphtml5_pages', [])]
+            flip_data = config.get('fliphtml5_pages', [])
+            all_pages = []
+
+            # 1. YOL: ESKİ TİP (Normal Liste)
+            if isinstance(flip_data, list) and len(flip_data) > 0:
+                all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in flip_data]
+            
+            # 2. YOL: ŞİFRELİ TİP (v01 String)
+            elif isinstance(flip_data, str) and flip_data.startswith("v01"):
+                try:
+                    # 'deString.js' mantığı ile çözüyoruz
+                    decoded_json_str = de_string(flip_data)
+                    decoded_list = json.loads(decoded_json_str)
+                    
+                    if isinstance(decoded_list, list):
+                        all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in decoded_list]
+                except (json.JSONDecodeError, IndexError, TypeError, ValueError):
+                    # Şifre çözme hatası olursa sessizce geç, fallback'e düşsün
+                    all_pages = []
+
+            # 3. YOL: FALLBACK (Meta Verisi)
+            # Eğer yukarıdakiler işe yaramadıysa sayfa sayısından tahmin et
+            if not all_pages and 'meta' in config and 'pageCount' in config.get('meta', {}):
+                try:
+                    page_count = int(config['meta']['pageCount'])
+                    all_pages = [str(i) for i in range(1, page_count + 1)]
+                except (ValueError, TypeError):
+                    all_pages = []
+            
             if not all_pages:
                 print(STRINGS["error_no_pages_in_config"], file=sys.stderr)
                 return
+            
             total_pages = len(all_pages)
-        except (TypeError, IndexError):
+            
+        except (TypeError, IndexError, AttributeError) as e:
             print(STRINGS["error_could_not_parse"], file=sys.stderr)
             return
+        # -------------------------------------------------------------
 
         print(STRINGS["found_pages"].format(total_pages=total_pages))
-        
+
         start_page_str = input(STRINGS["prompt_start_page"])
         end_page_str = input(STRINGS["prompt_end_page"].format(total_pages=total_pages))
-        
+
         start_page = int(start_page_str) if start_page_str.isdigit() else 1
         end_page = int(end_page_str) if end_page_str.isdigit() else total_pages
 
@@ -210,16 +275,16 @@ def main():
         folder_name = input(STRINGS["prompt_folder_name"].format(default_folder=default_folder)) or default_folder
         pdf_name = input(STRINGS["prompt_pdf_name"].format(folder_name=folder_name)) or f"{folder_name}.pdf"
         skip_existing = input(STRINGS["prompt_skip_existing"]).lower().startswith(STRINGS["skip_yes"])
-        
+
         os.makedirs(folder_name, exist_ok=True)
 
         if not (1 <= start_page <= total_pages and start_page <= end_page <= total_pages):
             print(STRINGS["error_invalid_range"].format(total_pages=total_pages), file=sys.stderr)
             return
-            
+
         pages_to_download = all_pages[start_page - 1:end_page]
         print(STRINGS["processing_pages"].format(count=len(pages_to_download), start=start_page, end=end_page))
-        
+
         tasks = [(session, page, book_id, folder_name, skip_existing) for page in pages_to_download]
         d, s, f, first_err_url = 0, 0, 0, None
 
@@ -240,7 +305,7 @@ def main():
 
     print(STRINGS["download_complete"].format(downloaded=d, skipped=s, failed=f))
     if first_err_url: print(STRINGS["first_fail_url"].format(url=first_err_url))
-    
+
     if d > 0 or (s > 0 and not os.path.exists(pdf_name)):
         convert_images_to_pdf(folder_name, pdf_name, pages_to_download, STRINGS)
     elif f == len(tasks):
@@ -250,5 +315,6 @@ def main():
 
     print(STRINGS["all_complete"])
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()
+    
