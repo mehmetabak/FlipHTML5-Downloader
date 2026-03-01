@@ -1,9 +1,16 @@
+import nest_asyncio
+nest_asyncio.apply() # Colab'daki asyncio loop hatasını çözer
+
 import os
 import sys
 import json
 import random
 import re
 import concurrent.futures
+import base64
+import urllib.parse
+import zlib
+import asyncio
 
 # 1. Bağımlılık Kontrolü
 try:
@@ -12,43 +19,32 @@ try:
     from tqdm import tqdm
     from fpdf import FPDF
     from PyPDF2 import PdfMerger
+    from playwright.async_api import async_playwright
 except ImportError as e:
     missing_module = str(e).split("'")[1]
-    print(f"[-] Hata: Gerekli bir kütüphane eksik: '{missing_module}'")
-    print(f"[-] Lütfen yüklemek için şu komutu çalıştırın: pip install {missing_module}")
+    print(f"[-] Hata/Error: Eksik Kütüphane / Missing Library: '{missing_module}'")
+    print(f"[-] Lütfen yükleyin / Please install: pip install {missing_module}")
     sys.exit(1)
 
-# --- ŞİFRE ÇÖZÜCÜ FONKSİYON (FlipHTML5 'v01' formatı için) ---
+# İsteğe bağlı lzstring kütüphanesi
+try:
+    import lzstring
+except ImportError:
+    lzstring = None
+
+# --- ŞİFRE ÇÖZÜCÜ FONKSİYON ---
 def de_string(s):
-    """
-    FlipHTML5 'deString' fonksiyonunun Python karşılığı.
-    'v01' ile başlayan şifreli config string'ini çözer.
-    Mantık: Stringi ortadan ikiye bölüp fermuar gibi birleştirir.
-    """
     if not isinstance(s, str) or not s.startswith("v01"):
         return None
-    
-    # 'v01' önekini at (ilk 3 karakter)
     buffer = s[3:]
     length = len(buffer)
-    
-    # Algoritma: Stringi ikiye böl
-    # JS karşılığı: h = length >> 1
-    h = length >> 1  # Bitwise shift right (tam sayı olarak 2'ye bölme)
-    
+    h = length >> 1 
     decoded_parts = []
-    
-    # İlk yarı ve ikinci yarıyı sırayla birleştir
     for i in range(h):
-        # buffer[i] -> İlk yarıdan bir karakter
-        # buffer[h + i] -> İkinci yarıdan bir karakter
         decoded_parts.append(buffer[i])
         decoded_parts.append(buffer[h + i])
-    
-    # Eğer uzunluk tek sayıysa, son kalan karakteri (ikinci yarının sonu) ekle
     if length % 2 == 1:
         decoded_parts.append(buffer[length - 1])
-        
     return "".join(decoded_parts)
 
 # --- Sabitler ve Ayarlar ---
@@ -62,14 +58,16 @@ MAX_THREADS = 15
 # --- Dil Metinleri ---
 LANGUAGES = {
     "en": {
-        "header": "--- FlipHTML5 Downloader - v8 (Final by arasTiR) ---",
+        "header": "--- FlipHTML5 Downloader - v11 (Hybrid & Multi-Path Edition) ---",
         "instructions_title": "\nIMPORTANT: Use the ID from the book's direct URL, not from a 'bookcase' link.",
         "instructions_line1": "Example: For 'https://fliphtml5.com/wrbmv/shsy/', the ID is 'wrbmv/shsy'",
         "instructions_line2": "Example: For 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
         "prompt_book_id": "[*] Enter the Book ID (e.g., xovyu/bzlq): ",
         "warn_id_format": "\n[!] WARNING: The Book ID format seems incorrect. It should be 'xxxx/yyyy'.\n",
-        "fetching_config": "[*] Fetching book configuration...",
-        "found_pages": "[*] Found {total_pages} pages in the book.",
+        "fetching_config": "[*] Phase 1: Fetching book configuration...",
+        "pw_fallback": "[!] Advanced protection (Wasm) detected. Phase 2: Starting Headless Browser bypass...",
+        "pw_searching_memory": "[*] JS Hook returned empty, aggressive memory HTML scanning initiated...",
+        "found_pages": "[+] Success! Found {total_pages} pages in the book.",
         "prompt_start_page": "[*] Enter the start page (Press Enter for 1): ",
         "prompt_end_page": "[*] Enter the end page (Press Enter for {total_pages}): ",
         "prompt_folder_name": "[*] Enter folder name (Press Enter for '{default_folder}'): ",
@@ -90,22 +88,24 @@ LANGUAGES = {
         "pdf_skipped_all_failed": "[-] PDF creation skipped because all downloads failed.",
         "pdf_skipped_no_new": "[*] PDF creation skipped as no new files were downloaded.",
         "all_complete": "\n--- All operations complete ---",
-        "error_fetching_config": "[-] CRITICAL: Failed to fetch or parse configuration file. Please check Book ID and network connection.",
-        "error_no_pages_in_config": "[-] No pages found in the configuration. Please check the Book ID.",
-        "error_could_not_parse": "[-] Could not parse page data from configuration. The site structure may have changed.",
+        "error_fetching_config": "[-] CRITICAL: Failed to fetch or parse configuration file.",
+        "error_no_pages_in_config": "[-] No pages found. The book might be private, ID wrong, or structure changed.",
+        "error_could_not_parse": "[-] Could not parse page data from configuration.",
         "error_invalid_range": "[-] Invalid page range! Please specify a range between 1 and {total_pages}.",
         "error_image_processing": "[-] Error: Could not process '{filename}': {error}",
         "error_no_images_to_process": "[-] No images found to process for PDF creation."
     },
     "tr": {
-        "header": "--- FlipHTML5 İndirici - v8 (Final by arasTiR) ---",
+        "header": "--- FlipHTML5 İndirici - v11 (Hibrit & Çoklu-Yol Sürümü) ---",
         "instructions_title": "\nÖNEMLİ: 'bookcase' linki yerine doğrudan kitabın URL'sindeki ID'yi kullanın.",
         "instructions_line1": "Örnek: 'https://fliphtml5.com/wrbmv/shsy/' için ID: 'wrbmv/shsy'",
         "instructions_line2": "Örnek: 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
         "prompt_book_id": "[*] Kitap ID'sini girin (ör: xovyu/bzlq): ",
         "warn_id_format": "\n[!] UYARI: Kitap ID formatı yanlış görünüyor. 'xxxx/yyyy' formatında olmalıdır.\n",
-        "fetching_config": "[*] Kitap yapılandırması çekiliyor...",
-        "found_pages": "[*] Kitapta {total_pages} sayfa bulundu.",
+        "fetching_config": "[*] Aşama 1: Kitap yapılandırması çekiliyor...",
+        "pw_fallback": "[!] Gelişmiş koruma (Wasm) tespit edildi. Aşama 2: Sanal Tarayıcı ile atlatılıyor, lütfen bekleyin...",
+        "pw_searching_memory": "[*] JS Kancası boş döndü, bellek ve HTML agresif taranıyor...",
+        "found_pages": "[+] Başarılı! Kitapta {total_pages} sayfa bulundu.",
         "prompt_start_page": "[*] Başlangıç sayfasını girin (boş bırakırsanız: 1): ",
         "prompt_end_page": "[*] Bitiş sayfasını girin (boş bırakırsanız: {total_pages}): ",
         "prompt_folder_name": "[*] Klasör adını girin (boş bırakırsanız: '{default_folder}'): ",
@@ -126,25 +126,98 @@ LANGUAGES = {
         "pdf_skipped_all_failed": "[-] Tüm indirmeler başarısız olduğu için PDF oluşturma işlemi atlandı.",
         "pdf_skipped_no_new": "[*] Yeni dosya indirilmediği için PDF oluşturma işlemi atlandı.",
         "all_complete": "\n--- Tüm işlemler tamamlandı ---",
-        "error_fetching_config": "[-] KRİTİK: Yapılandırma dosyası çekilemedi veya işlenemedi. Lütfen Kitap ID'sini ve internet bağlantınızı kontrol edin.",
-        "error_no_pages_in_config": "[-] Yapılandırmada hiç sayfa bulunamadı. Lütfen Kitap ID'sini kontrol edin.",
-        "error_could_not_parse": "[-] Yapılandırmadan sayfa verileri okunamadı. Site yapısı değişmiş olabilir.",
+        "error_fetching_config": "[-] KRİTİK: Yapılandırma dosyası çekilemedi veya işlenemedi.",
+        "error_no_pages_in_config": "[-] Sayfa bulunamadı. Kitap gizli, ID hatalı veya site yapısı değişmiş olabilir.",
+        "error_could_not_parse": "[-] Yapılandırmadan sayfa verileri okunamadı.",
         "error_invalid_range": "[-] Geçersiz sayfa aralığı! Lütfen 1 ile {total_pages} arasında bir aralık belirtin.",
         "error_image_processing": "[-] Hata: '{filename}' işlenemedi: {error}",
         "error_no_images_to_process": "[-] PDF oluşturmak için işlenecek resim bulunamadı."
     }
 }
 
+# --- YÖNTEM 1: KLASİK İNDİRME MANTIĞI ---
 def fetch_config(session, book_id):
     config_url = f"https://online.fliphtml5.com/{book_id}/javascript/config.js"
     try:
         response = session.get(config_url, timeout=20)
         response.raise_for_status()
         json_match = re.search(r'var\s+htmlConfig\s*=\s*({.*?});', response.text, re.DOTALL)
-        return json.loads(json_match.group(1)) if json_match else None
-    except (requests.exceptions.RequestException, json.JSONDecodeError):
-        return None
+        return json.loads(json_match.group(1)) if json_match else None, response.text
+    except Exception:
+        return None, ""
 
+# --- YÖNTEM 2: ASYNC PLAYWRIGHT (WASM BYPASS) ---
+async def extract_via_playwright(book_id, STRINGS):
+    print(STRINGS["pw_fallback"])
+    pages = []
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+        page = await browser.new_page()
+
+        await page.add_init_script("""
+            window.flipPagesData = [];
+            const originalParse = JSON.parse;
+            JSON.parse = function(text, reviver) {
+                const result = originalParse(text, reviver);
+                try {
+                    if (Array.isArray(result) && result.length > 0) {
+                        const first = result[0];
+                        if (first && (first.n !== undefined || first.name !== undefined || typeof first === 'string')) {
+                            const str = JSON.stringify(first);
+                            if (str.includes('.jpg') || str.includes('.webp') || str.includes('.png')) {
+                                window.flipPagesData = result;
+                            }
+                        }
+                    } else if (result && result.list && Array.isArray(result.list)) {
+                        const first = result.list[0];
+                        if (first && (first.n !== undefined || first.name !== undefined)) {
+                            window.flipPagesData = result.list;
+                        }
+                    }
+                } catch(e) {}
+                return result;
+            };
+        """)
+
+        url = f"https://online.fliphtml5.com/{book_id}/"
+        try:
+            await page.goto(url, timeout=45000, wait_until="networkidle")
+        except Exception:
+            pass
+            
+        await page.wait_for_timeout(3000)
+
+        intercepted = await page.evaluate("window.flipPagesData")
+
+        if intercepted and len(intercepted) > 0:
+            for item in intercepted:
+                n_val = item.get('n', item.get('name')) if isinstance(item, dict) else item
+                if isinstance(n_val, list) and len(n_val) > 0:
+                    pages.append(os.path.splitext(os.path.basename(n_val[0]))[0])
+                elif isinstance(n_val, str):
+                    pages.append(os.path.splitext(os.path.basename(n_val))[0])
+        else:
+            print(STRINGS["pw_searching_memory"])
+            hashes = await page.evaluate("""() => {
+                let h = new Set();
+                let regex = /([a-fA-F0-9]{32})\\.(webp|jpg|png)/g;
+                let match = document.documentElement.innerHTML.match(regex);
+                if(match) match.forEach(m => h.add(m.split('.')[0]));
+                return Array.from(h);
+            }""")
+            if hashes:
+                pages = hashes
+
+        await browser.close()
+    
+    seen = set()
+    return [x for x in pages if not (x in seen or seen.add(x))]
+
+def run_playwright_sync(book_id, STRINGS):
+    return asyncio.run(extract_via_playwright(book_id, STRINGS))
+
+# --- DOSYA İNDİRME VE PDF ---
 def download_image(args):
     session, page_id, book_id, folder_name, skip_existing = args
     image_path_jpg = os.path.join(folder_name, f"{page_id}.jpg")
@@ -154,17 +227,22 @@ def download_image(args):
 
     headers = {'Referer': f"https://online.fliphtml5.com/{book_id}/"}
 
-    for ext in ['webp', 'jpg']:
-        url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.{ext}"
-        try:
-            response = session.get(url, headers=headers, timeout=20, stream=True)
-            if response.status_code == 200:
-                with Image.open(response.raw) as img:
-                    img.convert("RGB").save(image_path_jpg, "JPEG")
-                return "downloaded", None
-        except Exception:
-            continue
-    return "failed", url
+    # Hem 'large' hem 'thumb' klasörlerini, tüm uzantılarla deniyoruz
+    for folder in ['large', 'thumb']:
+        for ext in ['webp', 'jpg', 'png']:
+            url = f"https://online.fliphtml5.com/{book_id}/files/{folder}/{page_id}.{ext}"
+            try:
+                response = session.get(url, headers=headers, timeout=20, stream=True)
+                if response.status_code == 200:
+                    with Image.open(response.raw) as img:
+                        img.convert("RGB").save(image_path_jpg, "JPEG")
+                    return "downloaded", None
+            except Exception:
+                continue
+                
+    # Hiçbirinden dönmediyse hata (Raporlamak için varsayılan bir URL yolluyoruz)
+    failed_url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.webp"
+    return "failed", failed_url
 
 def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
     print(STRINGS["converting_to_pdf"])
@@ -184,13 +262,16 @@ def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
                 temp_pdf_files.append(temp_pdf_path)
         except Exception as e:
             print(STRINGS["error_image_processing"].format(filename=os.path.basename(image_path), error=e), file=sys.stderr)
+            
     if not temp_pdf_files:
         print(STRINGS["error_no_images_to_process"], file=sys.stderr)
         return
+        
     print(STRINGS["merging_pdf_pages"])
     for pdf_file in temp_pdf_files: merger.append(pdf_file)
     merger.write(pdf_name)
     merger.close()
+    
     for pdf_file in temp_pdf_files:
         try: os.remove(pdf_file)
         except OSError: pass
@@ -199,7 +280,7 @@ def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
 def main():
     lang_choice = ""
     while lang_choice not in ['en', 'tr']:
-        lang_choice = input("Select language / Dil seçin (en/tr): ").lower()
+        lang_choice = input("Select language / Dil seçin (en/tr): ").lower().strip()
     STRINGS = LANGUAGES[lang_choice]
 
     print(STRINGS["header"])
@@ -207,84 +288,110 @@ def main():
     print(STRINGS["instructions_line1"])
     print(STRINGS["instructions_line2"])
 
-    book_id = input(STRINGS["prompt_book_id"])
+    book_id = input(STRINGS["prompt_book_id"]).strip()
     if '/' not in book_id or len(book_id.split('/')) != 2: print(STRINGS["warn_id_format"])
+
+    all_pages = []
+    
+    # AŞAMA 1: Klasik ve Hızlı Çekim Denemesi
+    with requests.Session() as session:
+        session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
+        print(STRINGS["fetching_config"])
+        config, raw_text = fetch_config(session, book_id)
+        
+        if config:
+            try:
+                flip_data = config.get('fliphtml5_pages', [])
+                decoded_text = ""
+
+                if isinstance(flip_data, list) and len(flip_data) > 0:
+                    for page in flip_data:
+                        n_val = page.get('n', page.get('name'))
+                        if isinstance(n_val, list) and len(n_val) > 0:
+                            all_pages.append(os.path.splitext(os.path.basename(n_val[0]))[0])
+                        elif isinstance(n_val, str):
+                            all_pages.append(os.path.splitext(os.path.basename(n_val))[0])
+                
+                elif isinstance(flip_data, str) and flip_data.startswith("v01"):
+                    decoded_str = de_string(flip_data)
+                    
+                    if lzstring:
+                        try:
+                            lz = lzstring.LZString()
+                            temp_lz = lz.decompressFromBase64(decoded_str)
+                            if temp_lz and ("{" in temp_lz or "[" in temp_lz):
+                                decoded_text = temp_lz
+                        except Exception:
+                            pass
+                    
+                    if not decoded_text:
+                        try:
+                            b64_str = decoded_str + "=" * ((4 - len(decoded_str) % 4) % 4)
+                            raw_bytes = base64.b64decode(b64_str)
+                            try:
+                                raw_bytes = zlib.decompress(raw_bytes, zlib.MAX_WBITS|32)
+                            except Exception:
+                                try: raw_bytes = zlib.decompress(raw_bytes)
+                                except Exception: pass
+                            decoded_text = raw_bytes.decode('utf-8', errors='ignore')
+                            decoded_text = urllib.parse.unquote(decoded_text)
+                        except Exception:
+                            decoded_text = decoded_str
+                    
+                    if decoded_text:
+                        try:
+                            decoded_list = json.loads(decoded_text)
+                            iterable = decoded_list if isinstance(decoded_list, list) else decoded_list.get('list', decoded_list.get('pages', []))
+                            for page in iterable:
+                                n_val = page.get('n', page.get('name'))
+                                if isinstance(n_val, list) and len(n_val) > 0:
+                                    all_pages.append(os.path.splitext(os.path.basename(n_val[0]))[0])
+                                elif isinstance(n_val, str):
+                                    all_pages.append(os.path.splitext(os.path.basename(n_val))[0])
+                        except Exception:
+                            hashes = re.findall(r'([a-fA-F0-9]{32})', decoded_text)
+                            seen = set()
+                            for h in hashes:
+                                if h not in seen:
+                                    seen.add(h)
+                                    all_pages.append(h)
+            except Exception:
+                pass
+
+    # AŞAMA 2: Aşama 1 Başarısız Olduysa (WASM) Playwright'ı Devreye Sok
+    if not all_pages:
+        all_pages = run_playwright_sync(book_id, STRINGS)
+
+    # Son Kontrol
+    if not all_pages:
+        print(STRINGS["error_no_pages_in_config"], file=sys.stderr)
+        return
+        
+    total_pages = len(all_pages)
+    print(STRINGS["found_pages"].format(total_pages=total_pages))
+
+    start_page_str = input(STRINGS["prompt_start_page"])
+    end_page_str = input(STRINGS["prompt_end_page"].format(total_pages=total_pages))
+
+    start_page = int(start_page_str) if start_page_str.isdigit() else 1
+    end_page = int(end_page_str) if end_page_str.isdigit() else total_pages
+
+    default_folder = book_id.replace('/', '-')
+    folder_name = input(STRINGS["prompt_folder_name"].format(default_folder=default_folder)) or default_folder
+    pdf_name = input(STRINGS["prompt_pdf_name"].format(folder_name=folder_name)) or f"{folder_name}.pdf"
+    skip_existing = input(STRINGS["prompt_skip_existing"]).lower().startswith(STRINGS["skip_yes"])
+
+    os.makedirs(folder_name, exist_ok=True)
+
+    if not (1 <= start_page <= total_pages and start_page <= end_page <= total_pages):
+        print(STRINGS["error_invalid_range"].format(total_pages=total_pages), file=sys.stderr)
+        return
+
+    pages_to_download = all_pages[start_page - 1:end_page]
+    print(STRINGS["processing_pages"].format(count=len(pages_to_download), start=start_page, end=end_page))
 
     with requests.Session() as session:
         session.headers.update({'User-Agent': random.choice(USER_AGENTS)})
-
-        print(STRINGS["fetching_config"])
-        config = fetch_config(session, book_id)
-        if not config:
-            print(STRINGS["error_fetching_config"], file=sys.stderr)
-            return
-
-        # -------------------------------------------------------------
-        # REVİZE EDİLEN SAYFA ÇEKME MANTIĞI
-        # -------------------------------------------------------------
-        try:
-            flip_data = config.get('fliphtml5_pages', [])
-            all_pages = []
-
-            # 1. YOL: ESKİ TİP (Normal Liste)
-            if isinstance(flip_data, list) and len(flip_data) > 0:
-                all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in flip_data]
-            
-            # 2. YOL: ŞİFRELİ TİP (v01 String)
-            elif isinstance(flip_data, str) and flip_data.startswith("v01"):
-                try:
-                    # 'deString.js' mantığı ile çözüyoruz
-                    decoded_json_str = de_string(flip_data)
-                    decoded_list = json.loads(decoded_json_str)
-                    
-                    if isinstance(decoded_list, list):
-                        all_pages = [os.path.splitext(os.path.basename(page['n'][0]))[0] for page in decoded_list]
-                except (json.JSONDecodeError, IndexError, TypeError, ValueError):
-                    # Şifre çözme hatası olursa sessizce geç, fallback'e düşsün
-                    all_pages = []
-
-            # 3. YOL: FALLBACK (Meta Verisi)
-            # Eğer yukarıdakiler işe yaramadıysa sayfa sayısından tahmin et
-            if not all_pages and 'meta' in config and 'pageCount' in config.get('meta', {}):
-                try:
-                    page_count = int(config['meta']['pageCount'])
-                    all_pages = [str(i) for i in range(1, page_count + 1)]
-                except (ValueError, TypeError):
-                    all_pages = []
-            
-            if not all_pages:
-                print(STRINGS["error_no_pages_in_config"], file=sys.stderr)
-                return
-            
-            total_pages = len(all_pages)
-            
-        except (TypeError, IndexError, AttributeError) as e:
-            print(STRINGS["error_could_not_parse"], file=sys.stderr)
-            return
-        # -------------------------------------------------------------
-
-        print(STRINGS["found_pages"].format(total_pages=total_pages))
-
-        start_page_str = input(STRINGS["prompt_start_page"])
-        end_page_str = input(STRINGS["prompt_end_page"].format(total_pages=total_pages))
-
-        start_page = int(start_page_str) if start_page_str.isdigit() else 1
-        end_page = int(end_page_str) if end_page_str.isdigit() else total_pages
-
-        default_folder = book_id.replace('/', '-')
-        folder_name = input(STRINGS["prompt_folder_name"].format(default_folder=default_folder)) or default_folder
-        pdf_name = input(STRINGS["prompt_pdf_name"].format(folder_name=folder_name)) or f"{folder_name}.pdf"
-        skip_existing = input(STRINGS["prompt_skip_existing"]).lower().startswith(STRINGS["skip_yes"])
-
-        os.makedirs(folder_name, exist_ok=True)
-
-        if not (1 <= start_page <= total_pages and start_page <= end_page <= total_pages):
-            print(STRINGS["error_invalid_range"].format(total_pages=total_pages), file=sys.stderr)
-            return
-
-        pages_to_download = all_pages[start_page - 1:end_page]
-        print(STRINGS["processing_pages"].format(count=len(pages_to_download), start=start_page, end=end_page))
-
         tasks = [(session, page, book_id, folder_name, skip_existing) for page in pages_to_download]
         d, s, f, first_err_url = 0, 0, 0, None
 
@@ -315,6 +422,5 @@ def main():
 
     print(STRINGS["all_complete"])
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     main()
-    
