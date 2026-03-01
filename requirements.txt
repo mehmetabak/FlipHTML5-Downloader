@@ -3,9 +3,16 @@
 # kütüphaneleri kurması sağlanır.
 # Kurulum için: pip install -r requirements.txt
 
+# Temel İndirme ve İşleme Kütüphaneleri
 requests>=2.31.0
 pillow>=10.3.0
 tqdm>=4.66.0
 PyPDF2>=3.0.1
-# En son sürümü olan 1.7.2'yi temel alır. Gelecekte fpdf2'ye geçilebilir.
+
+# PDF Oluşturma (Gelecekte fpdf2'ye geçilebilir)
 fpdf>=1.7.2
+
+# Şifre Kırma ve Otomasyon Kütüphaneleri (v11 ile eklendi)
+playwright>=1.42.0
+nest_asyncio>=1.6.0
+lzstring>=1.0.4
