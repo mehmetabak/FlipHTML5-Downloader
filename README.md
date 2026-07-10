@@ -22,7 +22,7 @@ The **FlipHTML5 Downloader** is an advanced Python tool designed to download pub
 To use this tool, you need to install the required Python libraries and the Playwright browser binaries. Open your terminal and run:
 
 1. **Install Python Libraries:**
-   ```sh
+```sh
    pip install -r requirements.txt
 
 ```
