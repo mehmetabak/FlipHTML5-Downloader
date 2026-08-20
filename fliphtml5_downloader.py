@@ -54,6 +54,10 @@ USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15'
 ]
 MAX_THREADS = 15
+BOOK_BASE_URLS = [
+    "https://fliphtml5.com",
+    "https://online.fliphtml5.com"
+]
 
 # --- Dil Metinleri ---
 LANGUAGES = {
@@ -61,7 +65,7 @@ LANGUAGES = {
         "header": "--- FlipHTML5 Downloader - v11 (Hybrid & Multi-Path Edition) ---",
         "instructions_title": "\nIMPORTANT: Use the ID from the book's direct URL, not from a 'bookcase' link.",
         "instructions_line1": "Example: For 'https://fliphtml5.com/wrbmv/shsy/', the ID is 'wrbmv/shsy'",
-        "instructions_line2": "Example: For 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
+        "instructions_line2": "Example: For 'https://fliphtml5.com/xovyu/bzlq/' or 'https://online.fliphtml5.com/xovyu/bzlq/', the ID is 'xovyu/bzlq'\n",
         "prompt_book_id": "[*] Enter the Book ID (e.g., xovyu/bzlq): ",
         "warn_id_format": "\n[!] WARNING: The Book ID format seems incorrect. It should be 'xxxx/yyyy'.\n",
         "fetching_config": "[*] Phase 1: Fetching book configuration...",
@@ -99,7 +103,7 @@ LANGUAGES = {
         "header": "--- FlipHTML5 İndirici - v11 (Hibrit & Çoklu-Yol Sürümü) ---",
         "instructions_title": "\nÖNEMLİ: 'bookcase' linki yerine doğrudan kitabın URL'sindeki ID'yi kullanın.",
         "instructions_line1": "Örnek: 'https://fliphtml5.com/wrbmv/shsy/' için ID: 'wrbmv/shsy'",
-        "instructions_line2": "Örnek: 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
+        "instructions_line2": "Örnek: 'https://fliphtml5.com/xovyu/bzlq/' veya 'https://online.fliphtml5.com/xovyu/bzlq/' için ID: 'xovyu/bzlq'\n",
         "prompt_book_id": "[*] Kitap ID'sini girin (ör: xovyu/bzlq): ",
         "warn_id_format": "\n[!] UYARI: Kitap ID formatı yanlış görünüyor. 'xxxx/yyyy' formatında olmalıdır.\n",
         "fetching_config": "[*] Aşama 1: Kitap yapılandırması çekiliyor...",
@@ -137,14 +141,17 @@ LANGUAGES = {
 
 # --- YÖNTEM 1: KLASİK İNDİRME MANTIĞI ---
 def fetch_config(session, book_id):
-    config_url = f"https://online.fliphtml5.com/{book_id}/javascript/config.js"
-    try:
-        response = session.get(config_url, timeout=20)
-        response.raise_for_status()
-        json_match = re.search(r'var\s+htmlConfig\s*=\s*({.*?});', response.text, re.DOTALL)
-        return json.loads(json_match.group(1)) if json_match else None, response.text
-    except Exception:
-        return None, ""
+    for base_url in BOOK_BASE_URLS:
+        config_url = f"{base_url}/{book_id}/javascript/config.js"
+        try:
+            response = session.get(config_url, timeout=20)
+            response.raise_for_status()
+            json_match = re.search(r'var\s+htmlConfig\s*=\s*({.*?});', response.text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(1)), response.text
+        except Exception:
+            continue
+    return None, ""
 
 # --- YÖNTEM 2: ASYNC PLAYWRIGHT (WASM BYPASS) ---
 async def extract_via_playwright(book_id, STRINGS):
@@ -180,11 +187,13 @@ async def extract_via_playwright(book_id, STRINGS):
             };
         """)
 
-        url = f"https://online.fliphtml5.com/{book_id}/"
-        try:
-            await page.goto(url, timeout=45000, wait_until="networkidle")
-        except Exception:
-            pass
+        for base_url in BOOK_BASE_URLS:
+            url = f"{base_url}/{book_id}/"
+            try:
+                await page.goto(url, timeout=45000, wait_until="networkidle")
+                break
+            except Exception:
+                continue
             
         await page.wait_for_timeout(3000)
 
@@ -225,23 +234,24 @@ def download_image(args):
     if skip_existing and os.path.exists(image_path_jpg):
         return "skipped", None
 
-    headers = {'Referer': f"https://online.fliphtml5.com/{book_id}/"}
-
-    # Hem 'large' hem 'thumb' klasörlerini, tüm uzantılarla deniyoruz
-    for folder in ['large', 'thumb']:
-        for ext in ['webp', 'jpg', 'png']:
-            url = f"https://online.fliphtml5.com/{book_id}/files/{folder}/{page_id}.{ext}"
-            try:
-                response = session.get(url, headers=headers, timeout=20, stream=True)
-                if response.status_code == 200:
-                    with Image.open(response.raw) as img:
-                        img.convert("RGB").save(image_path_jpg, "JPEG")
-                    return "downloaded", None
-            except Exception:
-                continue
+    # Hem yeni hem eski alan adında; 'large' ve 'thumb' klasörlerini, tüm uzantılarla deniyoruz
+    for base_url in BOOK_BASE_URLS:
+        headers = {'Referer': f"{base_url}/{book_id}/"}
+        for folder in ['large', 'thumb']:
+            for ext in ['webp', 'jpg', 'png']:
+                url = f"{base_url}/{book_id}/files/{folder}/{page_id}.{ext}"
+                try:
+                    with session.get(url, headers=headers, timeout=20, stream=True) as response:
+                        content_type = response.headers.get("Content-Type", "").lower()
+                        if response.status_code == 200 and "text/html" not in content_type:
+                            with Image.open(response.raw) as img:
+                                img.convert("RGB").save(image_path_jpg, "JPEG")
+                            return "downloaded", None
+                except Exception:
+                    continue
                 
     # Hiçbirinden dönmediyse hata (Raporlamak için varsayılan bir URL yolluyoruz)
-    failed_url = f"https://online.fliphtml5.com/{book_id}/files/large/{page_id}.webp"
+    failed_url = f"{BOOK_BASE_URLS[0]}/{book_id}/files/large/{page_id}.webp"
     return "failed", failed_url
 
 def convert_images_to_pdf(folder_name, pdf_name, page_order, STRINGS):
